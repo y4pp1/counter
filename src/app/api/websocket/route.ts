@@ -1,4 +1,3 @@
-import { NextRequest } from 'next/server';
 import { WebSocketServer, WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -16,7 +15,11 @@ interface AuthenticatedClient {
 
 interface WebSocketMessage {
   type: 'ADD_PERSON' | 'UPDATE_COUNT' | 'REMOVE_PERSON' | 'SYNC_STATE' | 'PERSON_ADDED' | 'COUNT_UPDATED' | 'PERSON_REMOVED' | 'AUTHENTICATE' | 'AUTH_SUCCESS' | 'AUTH_FAILED' | 'AUTH_STATUS_UPDATE';
-  payload: any;
+  payload: unknown;
+}
+
+interface WebSocketError extends Error {
+  code?: string;
 }
 
 // 管理者パスワード（本来は環境変数で管理）
@@ -25,7 +28,7 @@ const WS_PORT = parseInt(process.env.WS_PORT || '8080');
 
 // In-memory storage
 let people: Person[] = [];
-let authenticatedClients = new Map<WebSocket, AuthenticatedClient>();
+const authenticatedClients = new Map<WebSocket, AuthenticatedClient>();
 
 // WebSocket server instance (グローバルで管理)
 let wss: WebSocketServer | null = null;
@@ -108,7 +111,7 @@ function initWebSocketServer(): Promise<WebSocketServer> {
         resolve(wss!);
       });
 
-      wss.on('error', (error: any) => {
+      wss.on('error', (error: WebSocketError) => {
         console.error('WebSocketサーバーエラー:', error);
         isInitializing = false;
         
@@ -158,8 +161,8 @@ function handleMessage(message: WebSocketMessage, sender: WebSocket) {
   
   switch (message.type) {
     case 'AUTHENTICATE':
-      const { password } = message.payload;
-      if (password === ADMIN_PASSWORD) {
+      const authPayload = message.payload as { password: string };
+      if (authPayload.password === ADMIN_PASSWORD) {
         if (client) {
           client.isAuthenticated = true;
         }
@@ -179,9 +182,10 @@ function handleMessage(message: WebSocketMessage, sender: WebSocket) {
 
     case 'ADD_PERSON':
       // 名前追加は認証不要
+      const addPayload = message.payload as { name: string };
       const newPerson: Person = {
         id: Date.now(),
-        name: message.payload.name.trim(),
+        name: addPayload.name.trim(),
         count: 0
       };
       people.push(newPerson);
@@ -202,7 +206,8 @@ function handleMessage(message: WebSocketMessage, sender: WebSocket) {
         return;
       }
 
-      const { id, increment } = message.payload;
+      const updatePayload = message.payload as { id: number; increment: boolean };
+      const { id, increment } = updatePayload;
       const personIndex = people.findIndex(p => p.id === id);
       if (personIndex !== -1) {
         if (increment) {
@@ -231,7 +236,8 @@ function handleMessage(message: WebSocketMessage, sender: WebSocket) {
         return;
       }
 
-      const removedPersonId = message.payload.id;
+      const removePayload = message.payload as { id: number };
+      const removedPersonId = removePayload.id;
       people = people.filter(p => p.id !== removedPersonId);
       
       broadcastToAll({
@@ -254,7 +260,7 @@ function broadcastToAll(message: WebSocketMessage) {
   });
 }
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     // WebSocketサーバーを初期化
     await initWebSocketServer();

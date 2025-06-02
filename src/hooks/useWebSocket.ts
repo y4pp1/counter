@@ -8,7 +8,7 @@ interface Person {
 
 interface WebSocketMessage {
   type: 'ADD_PERSON' | 'UPDATE_COUNT' | 'REMOVE_PERSON' | 'SYNC_STATE' | 'PERSON_ADDED' | 'COUNT_UPDATED' | 'PERSON_REMOVED' | 'AUTHENTICATE' | 'AUTH_SUCCESS' | 'AUTH_FAILED' | 'AUTH_STATUS_UPDATE';
-  payload: any;
+  payload: unknown;
 }
 
 export function useWebSocket() {
@@ -31,10 +31,21 @@ export function useWebSocket() {
       // Docker環境とプロキシ経由でのWebSocket接続
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsHost = window.location.hostname;
-      const wsPort = window.location.port === '3500' ? '3500' : '8080';
-      const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws`;
+      
+      let wsUrl: string;
+      
+      // nginx経由（ポート3500）の場合は/wsパスを使用
+      if (window.location.port === '3500' || window.location.port === '') {
+        const port = window.location.port === '' ? '' : `:${window.location.port}`;
+        wsUrl = `${wsProtocol}//${wsHost}${port}/ws`;
+      } else {
+        // 開発環境での直接接続
+        wsUrl = `${wsProtocol}//${wsHost}:8080`;
+      }
       
       console.log('WebSocket接続URL:', wsUrl);
+      console.log('Current location:', window.location.href);
+      
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -60,14 +71,19 @@ export function useWebSocket() {
         }
       };
 
-      ws.onclose = () => {
-        console.log('WebSocket接続が切断されました');
+      ws.onclose = (event) => {
+        console.log('WebSocket接続が切断されました', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean
+        });
         setConnectionStatus('disconnected');
         setIsAuthenticated(false);
         wsRef.current = null;
         
-        // 自動再接続
+        // 自動再接続（頻度を制限）
         reconnectTimeoutRef.current = setTimeout(() => {
+          console.log('WebSocket再接続を試行します...');
           connect();
         }, 3000);
       };
@@ -87,23 +103,30 @@ export function useWebSocket() {
   const handleMessage = (message: WebSocketMessage) => {
     switch (message.type) {
       case 'SYNC_STATE':
-        setPeople(message.payload.people);
-        setAuthenticatedCount(message.payload.authenticatedCount);
-        setClientId(message.payload.clientId);
+        const syncPayload = message.payload as { 
+          people: Person[]; 
+          authenticatedCount: number; 
+          clientId: string; 
+        };
+        setPeople(syncPayload.people);
+        setAuthenticatedCount(syncPayload.authenticatedCount);
+        setClientId(syncPayload.clientId);
         break;
         
       case 'PERSON_ADDED':
+        const personPayload = message.payload as Person;
         setPeople(prev => {
-          const exists = prev.some(person => person.id === message.payload.id);
+          const exists = prev.some(person => person.id === personPayload.id);
           if (!exists) {
-            return [...prev, message.payload];
+            return [...prev, personPayload];
           }
           return prev;
         });
         break;
 
       case 'COUNT_UPDATED':
-        const { id, count } = message.payload;
+        const countPayload = message.payload as { id: number; count: number };
+        const { id, count } = countPayload;
         setPeople(prev => prev.map(person =>
           person.id === id
             ? { ...person, count }
@@ -112,37 +135,43 @@ export function useWebSocket() {
         break;
 
       case 'PERSON_REMOVED':
-        setPeople(prev => prev.filter(person => person.id !== message.payload.id));
+        const removePayload = message.payload as { id: number };
+        setPeople(prev => prev.filter(person => person.id !== removePayload.id));
         break;
 
       case 'AUTH_SUCCESS':
+        const successPayload = message.payload as { message: string };
         setIsAuthenticated(true);
-        setAuthMessage(message.payload.message);
+        setAuthMessage(successPayload.message);
         setTimeout(() => setAuthMessage(''), 3000);
         break;
 
       case 'AUTH_FAILED':
+        const failedPayload = message.payload as { message: string };
         setIsAuthenticated(false);
-        setAuthMessage(message.payload.message);
+        setAuthMessage(failedPayload.message);
         setTimeout(() => setAuthMessage(''), 5000);
         break;
 
       case 'AUTH_STATUS_UPDATE':
-        setAuthenticatedCount(message.payload.authenticatedCount);
+        const statusPayload = message.payload as { authenticatedCount: number };
+        setAuthenticatedCount(statusPayload.authenticatedCount);
         break;
 
       // 古いメッセージタイプとの互換性を保持（念のため）
       case 'ADD_PERSON':
+        const oldAddPayload = message.payload as { name: string };
         const newPerson: Person = {
           id: Date.now(),
-          name: message.payload.name.trim(),
+          name: oldAddPayload.name.trim(),
           count: 0
         };
         setPeople(prev => [...prev, newPerson]);
         break;
 
       case 'UPDATE_COUNT':
-        const { id: updateId, increment } = message.payload;
+        const oldUpdatePayload = message.payload as { id: number; increment: boolean };
+        const { id: updateId, increment } = oldUpdatePayload;
         setPeople(prev => prev.map(person =>
           person.id === updateId
             ? {
@@ -156,7 +185,8 @@ export function useWebSocket() {
         break;
 
       case 'REMOVE_PERSON':
-        setPeople(prev => prev.filter(person => person.id !== message.payload.id));
+        const oldRemovePayload = message.payload as { id: number };
+        setPeople(prev => prev.filter(person => person.id !== oldRemovePayload.id));
         break;
     }
   };

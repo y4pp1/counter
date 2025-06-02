@@ -13,6 +13,7 @@ services:
       - WS_PORT=8080
       - ADMIN_PASSWORD=admin123
       - NEXT_TELEMETRY_DISABLED=1
+      - DEBUG=*
     ports:
       - "3000:3000"  # HTTP port for development access
       - "8080:8080"  # WebSocket port for development access
@@ -25,6 +26,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Nginx Reverse Proxy
   nginx:
@@ -42,11 +48,16 @@ services:
     volumes:
       - nginx-logs:/var/log/nginx
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3500/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3500/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # Networks
 networks:

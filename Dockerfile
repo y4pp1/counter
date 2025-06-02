@@ -17,8 +17,9 @@ RUN \
 # Rebuild the source code only when needed
 FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+RUN npm ci
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry
@@ -30,6 +31,9 @@ RUN npm run build
 # Production image, copy all the files and run next
 FROM base AS runner
 WORKDIR /app
+
+# Install wget for health checks
+RUN apk add --no-cache wget
 
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
