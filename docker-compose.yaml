@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # Next.js Application
+  nextjs-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: counter-nextjs
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - WS_PORT=8080
+      - ADMIN_PASSWORD=admin123
+      - NEXT_TELEMETRY_DISABLED=1
+      - DEBUG=*
+    ports:
+      - "3000:3000"  # HTTP port for development access
+      - "8080:8080"  # WebSocket port for development access
+    networks:
+      - counter-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/websocket"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Nginx Reverse Proxy
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: counter-nginx
+    ports:
+      - "3500:3500"  # External access port
+    depends_on:
+      - nextjs-app
+    networks:
+      - counter-network
+    restart: unless-stopped
+    volumes:
+      - nginx-logs:/var/log/nginx
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3500/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Networks
+networks:
+  counter-network:
+    driver: bridge
+    name: counter-network
+
+# Volumes
+volumes:
+  nginx-logs:
+    name: counter-nginx-logs 
